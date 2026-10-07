@@ -4,7 +4,7 @@
  * Entities are found by a per-child prefix (e.g. prefix: kid1 -> input_select.kid1_medicine).
  * MIT License
  */
-const KH_VERSION = "0.1.0";
+const KH_VERSION = "0.1.1";
 
 /* ---------- shared helpers ---------- */
 const khPad = (n) => String(n).padStart(2, "0");
@@ -318,8 +318,11 @@ class KhTemperatureCard extends KhBase {
     const h = this._hass, ids = this._ids(), c = this._config;
     const fever = c.fever || 38, hours = c.hours || 24;
     const loggedS = khState(h, ids.logged);
+    const showGraph = c.show_graph !== false;
+    this.$("svg").style.display = showGraph ? "" : "none";
+    this.$(".axis").style.display = showGraph ? "" : "none";
     const changed = loggedS ? loggedS.last_changed : null;
-    if (changed !== this._lastChanged || !this._histAt || Date.now() - this._histAt > 300000) { this._lastChanged = changed; this._fetchHistory(); }
+    if (showGraph && (changed !== this._lastChanged || !this._histAt || Date.now() - this._histAt > 300000)) { this._lastChanged = changed; this._fetchHistory(); }
     this.$(".tt").textContent = c.title || "Temperature";
     const ts = khTs(h, ids.last);
     const now = Date.now() / 1000;
@@ -328,10 +331,10 @@ class KhTemperatureCard extends KhBase {
     this.$(".tval").textContent = `${entry.toFixed(1)} °C`;
     this.$(".from").textContent = `${hours} h ago`;
     this.$(".mid").textContent = `${fever.toFixed(1)} °C fever line`;
-    this.$(".note").textContent = c.note || `No reading for 24 h resets to 37.0 °C`;
+    this.$(".note").textContent = c.note || (showGraph ? "No reading for 24 h resets to 37.0 °C" : `Fever from ${fever.toFixed(1)} °C · no reading for 24 h resets to 37.0 °C`);
     const btn = this.$(".action");
     btn.textContent = btn._flash || `Log temperature · ${entry.toFixed(1)} °C`;
-    this._draw(fever, hours, now, loggedS ? parseFloat(loggedS.state) : NaN);
+    if (showGraph) this._draw(fever, hours, now, loggedS ? parseFloat(loggedS.state) : NaN);
   }
   _draw(fever, hours, now, current) {
     const t0 = now - hours * 3600;
