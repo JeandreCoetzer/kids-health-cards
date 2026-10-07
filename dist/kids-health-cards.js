@@ -4,7 +4,7 @@
  * Entities are found by a per-child prefix (e.g. prefix: kid1 -> input_select.kid1_medicine).
  * MIT License
  */
-const KH_VERSION = "0.3.1";
+const KH_VERSION = "0.3.2";
 
 /* ---------- shared helpers ---------- */
 const khPad = (n) => String(n).padStart(2, "0");
@@ -81,7 +81,7 @@ class KhStatusCard extends KhBase {
         .tile ha-icon { --mdc-icon-size: 22px; }
         .big { font-size: 22px; font-weight: 700; color: var(--primary-text-color); font-variant-numeric: tabular-nums; }
         .name { font-size: 15px; font-weight: 700; color: var(--primary-text-color); }
-        .sub { font-size: 12px; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sub { font-size: 12px; line-height: 1.35; color: var(--secondary-text-color); overflow-wrap: anywhere; }
         .ok { font-size: 12px; font-weight: 600; color: #2E9E5B; }
         .wait { font-size: 12px; font-weight: 600; color: #E67E22; }
         .fever { background: rgba(229,57,53,0.16); }
@@ -97,7 +97,7 @@ class KhStatusCard extends KhBase {
     const ml = khNum(h, `input_number.${p}_bottle_today`, 0);
     const detail = ((khState(h, `input_text.${p}_last_feed_detail`) || {}).state || "").replace(/^(unknown|unavailable)$/, "");
     let sub, line;
-    if (running) { sub = `Feeding now · ${(khState(h, `input_select.${p}_breast_side`) || {}).state || ""}`; line = `<div class="wait">In progress</div>`; }
+    if (running) { sub = `${(khState(h, `input_select.${p}_breast_side`) || {}).state || ""} side`; line = `<div class="wait">Feeding now</div>`; }
     else if (ts) { sub = `${khAgo(now - ts)}${detail ? " · " + detail : ""}`; line = `<div class="sub">${n} today${ml > 0 ? " · " + Math.round(ml) + " mL" : ""}</div>`; }
     else { sub = "No feeds yet"; line = ""; }
     return `<div class="tile"><ha-icon icon="mdi:baby-bottle-outline" style="color:${running ? "#E67E22" : "#2F6FC9"}"></ha-icon>
@@ -109,7 +109,7 @@ class KhStatusCard extends KhBase {
     const ts = khTs(h, `input_datetime.${p}_last_nappy`);
     const parts = [w && `${w} wet`, d && `${d} dirty`, b && `${b} both`].filter(Boolean).join(" · ");
     return `<div class="tile"><ha-icon icon="mdi:human-baby-changing-table" style="color:#11807A"></ha-icon>
-      <div class="name">Nappy</div><div class="sub">${khEsc(ts ? khAgo(now - ts) : "None yet")}</div><div class="sub">${khEsc(`${w + d + b} today${parts ? " · " + parts : ""}`)}</div></div>`;
+      <div class="name">Nappy</div><div class="sub">${khEsc(ts ? khAgo(now - ts) : "None yet")}</div><div class="sub">${w + d + b} today</div>${parts ? `<div class="sub">${khEsc(parts)}</div>` : ""}</div>`;
   }
   _update() {
     if (!this._hass || !this._config) return;
@@ -137,10 +137,11 @@ class KhStatusCard extends KhBase {
       const gap = khNum(h, `input_number.${k}_min_gap`, 0);
       let sub = "Not given", line = "";
       if (ts) {
-        sub = `${khHM(ts)} · ${n}${mx > 0 ? "/" + mx : ""} today`;
+        sub = khHM(ts);
+        line = `<div class="sub">${n}${mx > 0 ? "/" + mx : ""} today</div>`;
         if (gap > 0) {
           const nxt = ts + gap * 3600;
-          line = nxt > now ? `<div class="wait">Wait · ${khHM(nxt)}</div>` : `<div class="ok">OK to give</div>`;
+          line += nxt > now ? `<div class="wait">Wait · ${khHM(nxt)}</div>` : `<div class="ok">OK to give</div>`;
         }
       }
       html += `<div class="tile"><ha-icon icon="${khEsc(icons[m] || "mdi:pill-multiple")}" style="color:${khEsc(colors[m] || "#7C5CC4")}"></ha-icon>
@@ -613,7 +614,7 @@ class KhChildCard extends KhBase {
         .t { border-radius: 16px; padding: 14px; min-width: 0; }
         .t .k { font-size: 13px; font-weight: 600; }
         .t .v { font-size: 20px; font-weight: 700; color: var(--primary-text-color); font-variant-numeric: tabular-nums; margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .t .s { font-size: 13px; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .t .s { font-size: 13px; line-height: 1.35; color: var(--secondary-text-color); overflow-wrap: anywhere; }
         .acts { display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr)); gap: 8px; }
         .act { min-height: 52px; border-radius: 14px; border: none; font-weight: 700; font-size: 14px; cursor: pointer; color: #fff; }
         .act.plain { background: var(--secondary-background-color); color: var(--primary-text-color); }

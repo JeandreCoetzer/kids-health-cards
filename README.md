@@ -14,6 +14,32 @@ The cards contain no entity IDs of their own — each card finds its helpers fro
 | `custom:kh-timeline-card` | Several children on one 24 h timeline — doses, feeds, nappies and temperatures as coloured dots (from the log entity) |
 | `custom:kh-elapsed-card` | Count-up timer (mm:ss) from an `input_datetime`, ticking every second |
 
+## Screenshots
+
+| Toddler — medicine & temperature | Newborn — feeding & nappies | Dark theme |
+|---|---|---|
+| ![Status, medicine and temperature cards](https://raw.githubusercontent.com/JeandreCoetzer/kids-health-cards/main/docs/images/phone-light.png) | ![Status, feeding and nappy cards](https://raw.githubusercontent.com/JeandreCoetzer/kids-health-cards/main/docs/images/baby-light.png) | ![Feeding and nappy cards in a dark theme](https://raw.githubusercontent.com/JeandreCoetzer/kids-health-cards/main/docs/images/baby-dark.png) |
+
+**Tablet family overview** — `kh-child-card` ×2 + `kh-timeline-card`
+
+![Family overview with two child panels and a 24-hour timeline](https://raw.githubusercontent.com/JeandreCoetzer/kids-health-cards/main/docs/images/tablet-light.png)
+
+<details><summary>Individual cards</summary>
+
+| Card | Screenshot |
+|---|---|
+| `kh-status-card` | ![](https://raw.githubusercontent.com/JeandreCoetzer/kids-health-cards/main/docs/images/card-status.png) |
+| `kh-medicine-card` | ![](https://raw.githubusercontent.com/JeandreCoetzer/kids-health-cards/main/docs/images/card-medicine.png) |
+| `kh-temperature-card` | ![](https://raw.githubusercontent.com/JeandreCoetzer/kids-health-cards/main/docs/images/card-temperature.png) |
+| `kh-feeding-card` | ![](https://raw.githubusercontent.com/JeandreCoetzer/kids-health-cards/main/docs/images/card-feeding.png) |
+| `kh-nappy-card` | ![](https://raw.githubusercontent.com/JeandreCoetzer/kids-health-cards/main/docs/images/card-nappy.png) |
+| `kh-elapsed-card` | ![](https://raw.githubusercontent.com/JeandreCoetzer/kids-health-cards/main/docs/images/card-elapsed.png) |
+| Tablet overview, dark | ![](https://raw.githubusercontent.com/JeandreCoetzer/kids-health-cards/main/docs/images/tablet-dark.png) |
+
+</details>
+
+*Screenshots use example data. Colours follow your Home Assistant theme.*
+
 ## Install (HACS)
 
 1. HACS → ⋮ → **Custom repositories** → add this repository's URL, type **Dashboard**.
