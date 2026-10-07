@@ -4,7 +4,7 @@
  * Entities are found by a per-child prefix (e.g. prefix: kid1 -> input_select.kid1_medicine).
  * MIT License
  */
-const KH_VERSION = "0.1.1";
+const KH_VERSION = "0.2.0";
 
 /* ---------- shared helpers ---------- */
 const khPad = (n) => String(n).padStart(2, "0");
@@ -410,11 +410,229 @@ class KhElapsedCard extends HTMLElement {
   getGridOptions() { return { columns: 12, rows: 2, min_rows: 2 }; }
 }
 
+
+/* ---------- navigation helper ---------- */
+const khNavigate = (path) => {
+  if (!path) return;
+  history.pushState(null, "", path);
+  window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+};
+
+/* ---------- Child overview (tablet / family view) ---------- */
+class KhChildCard extends KhBase {
+  constructor() { super(); this._tickMs = 15000; }
+  _build() {
+    this.shadowRoot.innerHTML = `
+      <style>${KH_BASE_CSS}
+        ha-card { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+        .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .head h2 { margin: 0; font-size: 22px; font-weight: 700; color: var(--primary-text-color); display: flex; align-items: center; gap: 8px; }
+        .badge { font-weight: 700; font-size: 13px; padding: 6px 12px; border-radius: 14px; white-space: nowrap; }
+        .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .t { border-radius: 16px; padding: 14px; min-width: 0; }
+        .t .k { font-size: 13px; font-weight: 600; }
+        .t .v { font-size: 20px; font-weight: 700; color: var(--primary-text-color); font-variant-numeric: tabular-nums; margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .t .s { font-size: 13px; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .acts { display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr)); gap: 8px; }
+        .act { min-height: 52px; border-radius: 14px; border: none; font-weight: 700; font-size: 14px; cursor: pointer; color: #fff; }
+        .act.plain { background: var(--secondary-background-color); color: var(--primary-text-color); }
+      </style>
+      <ha-card>
+        <div class="head"><h2><ha-icon></ha-icon><span class="nm"></span></h2><span class="badge"></span></div>
+        <div class="tiles"></div>
+        <div class="acts"></div>
+      </ha-card>`;
+  }
+  _tile(type) {
+    const h = this._hass, p = this._p, now = Date.now() / 1000;
+    const tint = (hex) => `background:${hex}24;`;
+    if (type.startsWith("medicine:")) {
+      const m = type.slice(9), k = khMedKey(m);
+      const color = { Panadol: "#7C5CC4", Nurofen: "#D97706" }[m] || "#7C5CC4";
+      const ts = khTs(h, `input_datetime.${p}_${k}_last`);
+      const n = khNum(h, `counter.${p}_${k}_today`, 0);
+      const mx = khNum(h, `input_number.${k}_max_daily`, 0);
+      const gap = khNum(h, `input_number.${k}_min_gap`, 0);
+      let s = `${n}${mx > 0 ? "/" + mx : ""} today`;
+      if (ts && gap > 0) s += ts + gap * 3600 > now ? ` · next ${khHM(ts + gap * 3600)}` : " · OK to give";
+      return `<div class="t" style="${tint(color)}"><div class="k" style="color:${color}">${khEsc(m)}</div><div class="v">${ts ? khHM(ts) : "—"}</div><div class="s">${khEsc(ts ? s : "Not given")}</div></div>`;
+    }
+    if (type === "feed") {
+      const color = "#2F6FC9";
+      const running = (khState(h, `input_boolean.${p}_breastfeeding`) || {}).state === "on";
+      const ts = khTs(h, `input_datetime.${p}_last_feed`);
+      const n = khNum(h, `counter.${p}_feeds_today`, 0);
+      const ml = khNum(h, `input_number.${p}_bottle_today`, 0);
+      const detail = ((khState(h, `input_text.${p}_last_feed_detail`) || {}).state || "").replace(/^(unknown|unavailable)$/, "");
+      let v = "—", s = `${n} today${ml > 0 ? " · " + Math.round(ml) + " mL" : ""}`;
+      if (running) {
+        const side = (khState(h, `input_select.${p}_breast_side`) || {}).state || "";
+        v = `Feeding · ${side}`;
+      } else if (ts) {
+        v = khAgo(now - ts).replace(" ago", "");
+        if (detail) s = `${detail} · ${s}`;
+      }
+      return `<div class="t" style="${tint(color)}"><div class="k" style="color:${color}">Last feed</div><div class="v">${khEsc(v)}</div><div class="s">${khEsc(s)}</div></div>`;
+    }
+    if (type === "nappy") {
+      const color = "#11807A";
+      const w = khNum(h, `counter.${p}_wet_today`, 0), d = khNum(h, `counter.${p}_dirty_today`, 0), b = khNum(h, `counter.${p}_wet_and_dirty_today`, 0);
+      const ts = khTs(h, `input_datetime.${p}_last_nappy`);
+      const parts = [w && `${w} wet`, d && `${d} dirty`, b && `${b} both`].filter(Boolean).join(" · ");
+      const s = [parts, ts ? `last ${khAgo(now - ts)}` : "none yet"].filter(Boolean).join(" · ");
+      return `<div class="t" style="${tint(color)}"><div class="k" style="color:${color}">Nappies today</div><div class="v">${w + d + b}</div><div class="s">${khEsc(s)}</div></div>`;
+    }
+    if (type === "temperature") {
+      const t = khNum(h, `input_number.${p}_temperature`, 37), fever = this._config.fever || 38;
+      const ts = khTs(h, `input_datetime.${p}_temperature_last_logged`);
+      const color = t >= fever ? "#E53935" : "#2E9E5B";
+      return `<div class="t" style="${tint(color)}"><div class="k" style="color:${color}">Temperature</div><div class="v">${t.toFixed(1)} °C</div><div class="s">${khEsc(ts && now - ts < 86400 ? "logged " + khHM(ts) : "default · no reading 24 h")}</div></div>`;
+    }
+    return "";
+  }
+  _update() {
+    if (!this._hass || !this._config) return;
+    const h = this._hass, c = this._config, p = this._p;
+    this.$(".nm").textContent = c.name || p;
+    this.$("ha-icon").setAttribute("icon", c.icon || "mdi:human-child");
+    const t = khNum(h, `input_number.${p}_temperature`, 37), fever = c.fever || 38;
+    const badge = this.$(".badge");
+    badge.textContent = t >= fever ? `Fever ${t.toFixed(1)} °C` : `${t.toFixed(1)} °C`;
+    badge.style.background = t >= fever ? "rgba(229,57,53,0.16)" : "rgba(46,158,91,0.16)";
+    badge.style.color = t >= fever ? "#E53935" : "#2E9E5B";
+    const tiles = c.tiles || ["medicine:Panadol", "medicine:Nurofen"];
+    const html = tiles.map((x) => this._tile(x)).join("");
+    const box = this.$(".tiles");
+    if (box._html !== html) { box.innerHTML = html; box._html = html; }
+    const acts = c.actions || [];
+    const key = JSON.stringify(acts);
+    const ab = this.$(".acts");
+    if (ab._key !== key) {
+      ab._key = key;
+      ab.style.setProperty("--n", String(Math.max(1, acts.length)));
+      ab.innerHTML = acts.map((a, i) => `<button class="act ${a.color ? "" : "plain"}" data-i="${i}" style="${a.color ? "background:" + khEsc(a.color) : ""}">${khEsc(a.label || "Open")}</button>`).join("");
+      ab.querySelectorAll(".act").forEach((b) => b.addEventListener("click", () => {
+        const a = acts[Number(b.dataset.i)];
+        if (a.script) this.call("script", "turn_on", { entity_id: a.script });
+        else khNavigate(a.navigation_path || a.path);
+      }));
+    }
+  }
+  getCardSize() { return 5; }
+}
+
+/* ---------- 24 h timeline across children ---------- */
+const KH_CATS = [
+  ["Panadol", "#7C5CC4"], ["Nurofen", "#D97706"], ["Feed", "#2F6FC9"], ["Nappy", "#11807A"], ["Temperature", "#2E9E5B"], ["Other", "#8A8F98"],
+];
+const khCategory = (e) => {
+  const first = String(e.message || e.name || "").split(" · ")[0].trim();
+  if (/^panadol/i.test(first)) return "Panadol";
+  if (/^nurofen/i.test(first)) return "Nurofen";
+  if (/^(breastfeed|bottle|feed)/i.test(first)) return "Feed";
+  if (/^nappy/i.test(first)) return "Nappy";
+  if (/^temperature/i.test(first)) return "Temperature";
+  return "Other";
+};
+class KhTimelineCard extends HTMLElement {
+  setConfig(config) {
+    if (!config || !Array.isArray(config.children) || !config.children.length) throw new Error("kh-timeline-card: 'children' list is required (name + prefix or log_entity)");
+    this._config = config;
+    this._data = this._data || {};
+    if (this._built) this._render();
+  }
+  set hass(hass) {
+    const first = !this._hass;
+    this._hass = hass;
+    if (!this._built) this._build();
+    if (first) this._fetch();
+  }
+  connectedCallback() { clearInterval(this._t); this._t = setInterval(() => this._fetch(), 60000); }
+  disconnectedCallback() { clearInterval(this._t); }
+  _logEntity(ch) { return ch.log_entity || `input_text.${ch.prefix}_health_log`; }
+  _build() {
+    this._built = true;
+    this.attachShadow({ mode: "open" });
+    this.shadowRoot.innerHTML = `
+      <style>
+        ha-card { padding: 20px; border-radius: var(--ha-card-border-radius, 22px); }
+        .top { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+        h2 { margin: 0; font-size: 20px; font-weight: 700; color: var(--primary-text-color); }
+        .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--secondary-text-color); }
+        .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 5px; margin-right: 4px; vertical-align: -1px; }
+        .wrap { overflow-x: auto; }
+        .rows { min-width: 560px; display: flex; flex-direction: column; gap: 10px; }
+        .row { display: flex; align-items: center; gap: 12px; }
+        .who { width: 80px; flex: none; font-weight: 600; font-size: 14px; color: var(--primary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .lane { flex: 1; height: 38px; background: var(--secondary-background-color); border-radius: 10px; position: relative; }
+        .dot { position: absolute; top: 9px; width: 20px; height: 20px; margin-left: -10px; border-radius: 10px; border: 2px solid var(--ha-card-background, var(--card-background-color)); box-sizing: border-box; cursor: default; }
+        .ticks { display: flex; gap: 12px; font-size: 12px; color: var(--secondary-text-color); }
+        .ticks .sp { width: 80px; flex: none; }
+        .ticks .tl { flex: 1; position: relative; height: 16px; }
+        .ticks .tl span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+        .ticks .tl span:first-child { transform: none; }
+        .ticks .tl span:last-child { transform: translateX(-100%); }
+        .detail { margin-top: 10px; font-size: 13px; color: var(--secondary-text-color); min-height: 18px; }
+      </style>
+      <ha-card>
+        <div class="top"><h2></h2><div class="legend"></div></div>
+        <div class="wrap"><div class="rows"></div></div>
+        <div class="detail"></div>
+      </ha-card>`;
+    this._render();
+  }
+  async _fetch() {
+    if (!this._hass || !this._config) return;
+    const hours = this._config.hours || 24;
+    const end = new Date(), start = new Date(end.getTime() - hours * 3600 * 1000);
+    this._range = [start.getTime() / 1000, end.getTime() / 1000];
+    await Promise.all(this._config.children.map(async (ch) => {
+      const ent = this._logEntity(ch);
+      try {
+        const res = await this._hass.callApi("GET", `logbook/${start.toISOString()}?entity=${ent}&end_time=${end.toISOString()}`);
+        this._data[ent] = (res || []).filter((e) => e.message && !/^changed to/i.test(e.message))
+          .map((e) => ({ t: new Date(e.when).getTime() / 1000, text: e.message.startsWith(e.name || "\u0000") ? e.message : `${e.name ? e.name + " · " : ""}${e.message}`, cat: khCategory(e), fever: /fever/i.test(e.message) }));
+      } catch (err) { /* keep previous */ }
+    }));
+    this._render();
+  }
+  _render() {
+    if (!this._built || !this._config) return;
+    const c = this._config, root = this.shadowRoot;
+    const hours = c.hours || 24;
+    root.querySelector("h2").textContent = c.title || `Last ${hours} hours`;
+    root.querySelector(".legend").innerHTML = KH_CATS.filter(([n]) => n !== "Other").map(([n, col]) => `<span><i style="background:${col}"></i>${n}</span>`).join("");
+    const [t0, t1] = this._range || [Date.now() / 1000 - hours * 3600, Date.now() / 1000];
+    const col = Object.fromEntries(KH_CATS);
+    const rows = c.children.map((ch) => {
+      const evs = this._data[this._logEntity(ch)] || [];
+      const dots = evs.filter((e) => e.t >= t0 && e.t <= t1).map((e) => {
+        const left = ((e.t - t0) / (t1 - t0)) * 100;
+        const colr = e.cat === "Temperature" && e.fever ? "#E53935" : col[e.cat];
+        return `<span class="dot" style="left:${left.toFixed(2)}%;background:${colr}" title="${khEsc(khHM(e.t) + " · " + e.text)}" data-d="${khEsc(khHM(e.t) + " · " + (ch.name || "") + " · " + e.text)}"></span>`;
+      }).join("");
+      return `<div class="row"><span class="who">${khEsc(ch.name || ch.prefix)}</span><div class="lane">${dots}</div></div>`;
+    }).join("");
+    const step = hours / 6;
+    const ticks = Array.from({ length: 7 }, (_, i) => {
+      const t = t0 + i * step * 3600;
+      return `<span style="left:${((i / 6) * 100).toFixed(2)}%">${i === 6 ? "now" : khHM(t)}</span>`;
+    }).join("");
+    root.querySelector(".rows").innerHTML = rows + `<div class="ticks"><span class="sp"></span><div class="tl">${ticks}</div></div>`;
+    const det = root.querySelector(".detail");
+    root.querySelectorAll(".dot").forEach((d) => d.addEventListener("click", () => { det.textContent = d.dataset.d; }));
+  }
+  getCardSize() { return 4; }
+  getGridOptions() { return { columns: "full", min_columns: 6 }; }
+}
+
 /* ---------- register ---------- */
 const KH_CARDS = [
   ["kh-status-card", KhStatusCard, "Kids Health – status tiles", "Temperature and last-dose tiles for one child."],
   ["kh-medicine-card", KhMedicineCard, "Kids Health – give medicine", "Medicine chips, dose stepper, given-at time and log button."],
   ["kh-temperature-card", KhTemperatureCard, "Kids Health – temperature", "Temperature stepper, 24 h trend with fever line, log button."],
+  ["kh-child-card", KhChildCard, "Kids Health – child overview", "Family-view panel: fever badge, medicine/feed/nappy tiles, quick actions."],
+  ["kh-timeline-card", KhTimelineCard, "Kids Health – 24 h timeline", "Doses, feeds, nappies and temperatures for several children on one timeline."],
   ["kh-elapsed-card", KhElapsedCard, "Kids Health – elapsed timer", "Counts up from an input_datetime, ticking every second."],
 ];
 window.customCards = window.customCards || [];
