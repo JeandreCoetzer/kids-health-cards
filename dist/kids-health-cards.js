@@ -4,7 +4,7 @@
  * Entities are found by a per-child prefix (e.g. prefix: kid1 -> input_select.kid1_medicine).
  * MIT License
  */
-const KH_VERSION = "0.2.0";
+const KH_VERSION = "0.3.0";
 
 /* ---------- shared helpers ---------- */
 const khPad = (n) => String(n).padStart(2, "0");
@@ -89,6 +89,28 @@ class KhStatusCard extends KhBase {
       </style>
       <div class="grid"></div>`;
   }
+  _feedTile() {
+    const h = this._hass, p = this._p, now = Date.now() / 1000;
+    const running = (khState(h, `input_boolean.${p}_breastfeeding`) || {}).state === "on";
+    const ts = khTs(h, `input_datetime.${p}_last_feed`);
+    const n = khNum(h, `counter.${p}_feeds_today`, 0);
+    const ml = khNum(h, `input_number.${p}_bottle_today`, 0);
+    const detail = ((khState(h, `input_text.${p}_last_feed_detail`) || {}).state || "").replace(/^(unknown|unavailable)$/, "");
+    let sub, line;
+    if (running) { sub = `Feeding now · ${(khState(h, `input_select.${p}_breast_side`) || {}).state || ""}`; line = `<div class="wait">In progress</div>`; }
+    else if (ts) { sub = `${khAgo(now - ts)}${detail ? " · " + detail : ""}`; line = `<div class="sub">${n} today${ml > 0 ? " · " + Math.round(ml) + " mL" : ""}</div>`; }
+    else { sub = "No feeds yet"; line = ""; }
+    return `<div class="tile"><ha-icon icon="mdi:baby-bottle-outline" style="color:${running ? "#E67E22" : "#2F6FC9"}"></ha-icon>
+      <div class="name">Fed</div><div class="sub">${khEsc(sub)}</div>${line}</div>`;
+  }
+  _nappyTile() {
+    const h = this._hass, p = this._p, now = Date.now() / 1000;
+    const w = khNum(h, `counter.${p}_wet_today`, 0), d = khNum(h, `counter.${p}_dirty_today`, 0), b = khNum(h, `counter.${p}_wet_and_dirty_today`, 0);
+    const ts = khTs(h, `input_datetime.${p}_last_nappy`);
+    const parts = [w && `${w} wet`, d && `${d} dirty`, b && `${b} both`].filter(Boolean).join(" · ");
+    return `<div class="tile"><ha-icon icon="mdi:human-baby-changing-table" style="color:#11807A"></ha-icon>
+      <div class="name">Nappy</div><div class="sub">${khEsc(ts ? khAgo(now - ts) : "None yet")}</div><div class="sub">${khEsc(`${w + d + b} today${parts ? " · " + parts : ""}`)}</div></div>`;
+  }
   _update() {
     if (!this._hass || !this._config) return;
     const h = this._hass, p = this._p, c = this._config;
@@ -97,16 +119,17 @@ class KhStatusCard extends KhBase {
     const icons = Object.assign({ Panadol: "mdi:pill", Nurofen: "mdi:bottle-tonic-plus" }, c.icons || {});
     const fever = c.fever || 38;
     const now = Date.now() / 1000;
+    const order = c.tiles || [...(c.show_temperature !== false ? ["temperature"] : []), ...meds.map((m) => "medicine:" + m)];
     let html = "";
-    if (c.show_temperature !== false) {
+    const tempTile = () => {
       const t = khNum(h, `input_number.${p}_temperature`, 37);
       const ts = khTs(h, `input_datetime.${p}_temperature_last_logged`);
       const isF = t >= fever;
       const sub = !ts || now - ts >= 86400 ? "Default · no reading" : `${isF ? "Fever" : "Normal"} · ${khHM(ts)}`;
       html += `<div class="tile ${isF ? "fever" : ""}"><ha-icon icon="mdi:thermometer" style="color:${isF ? "#E53935" : "#2E9E5B"}"></ha-icon>
         <div class="big">${t.toFixed(1)}°</div><div class="sub">${khEsc(sub)}</div></div>`;
-    }
-    for (const m of meds) {
+    };
+    const medTile = (m) => {
       const k = khMedKey(m);
       const ts = khTs(h, `input_datetime.${p}_${k}_last`);
       const n = khNum(h, `counter.${p}_${k}_today`, 0);
@@ -122,9 +145,15 @@ class KhStatusCard extends KhBase {
       }
       html += `<div class="tile"><ha-icon icon="${khEsc(icons[m] || "mdi:pill-multiple")}" style="color:${khEsc(colors[m] || "#7C5CC4")}"></ha-icon>
         <div class="name">${khEsc(m)}</div><div class="sub">${khEsc(sub)}</div>${line}</div>`;
+    };
+    for (const x of order) {
+      if (x === "temperature") tempTile();
+      else if (x === "feed") html += this._feedTile();
+      else if (x === "nappy") html += this._nappyTile();
+      else if (x.startsWith("medicine:")) medTile(x.slice(9));
     }
     const grid = this.$(".grid");
-    grid.style.setProperty("--cols", String((c.show_temperature !== false ? 1 : 0) + meds.length));
+    grid.style.setProperty("--cols", String(Math.max(1, order.length)));
     if (grid._html !== html) { grid.innerHTML = html; grid._html = html; }
   }
   getCardSize() { return 2; }
@@ -411,6 +440,155 @@ class KhElapsedCard extends HTMLElement {
 }
 
 
+
+/* ---------- Feeding (breast timer / bottle) ---------- */
+class KhFeedingCard extends KhBase {
+  constructor() { super(); this._tickMs = 1000; }
+  _ids() {
+    const p = this._p;
+    return {
+      type: `input_select.${p}_feed_type`, running: `input_boolean.${p}_breastfeeding`, side: `input_select.${p}_breast_side`,
+      started: `input_datetime.${p}_feed_started`, last: `input_datetime.${p}_last_feed`, detail: `input_text.${p}_last_feed_detail`,
+      count: `counter.${p}_feeds_today`, mlToday: `input_number.${p}_bottle_today`, amount: `input_number.${p}_bottle_amount`,
+      tap: `script.${p}_breast_tap`, bottle: `script.${p}_log_bottle`,
+    };
+  }
+  _build() {
+    const accent = (this._config && this._config.accent) || "#2F6FC9";
+    this.shadowRoot.innerHTML = `
+      <style>${KH_BASE_CSS}
+        .chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+        .chip { min-height: 44px; border-radius: 22px; border: 2px solid transparent; background: var(--secondary-background-color); color: var(--primary-text-color); font-weight: 600; font-size: 14px; cursor: pointer; }
+        .chip.on { border-color: ${accent}; background: ${accent}2E; }
+        .sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .side { min-height: 104px; border-radius: 18px; border: 2px solid transparent; background: var(--secondary-background-color); color: var(--primary-text-color);
+                display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; padding: 8px; }
+        .side .l { font-size: 13px; font-weight: 600; color: var(--secondary-text-color); }
+        .side .m { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .side .s { font-size: 12px; color: var(--secondary-text-color); }
+        .side.sug { border-color: ${accent}; background: ${accent}24; }
+        .side.sug .l { color: ${accent}; }
+        .side.run { border-color: #E67E22; background: rgba(230,126,34,0.18); }
+        .side.run .l, .side.run .s { color: #E67E22; }
+        .side.run .m { font-size: 30px; }
+        .bottle .pill { margin-top: 0; }
+        .action.feed { background: ${accent}; }
+        .last { font-size: 13px; color: var(--secondary-text-color); margin-top: 12px; }
+      </style>
+      <ha-card>
+        <div class="title"><span class="tt"></span><small class="sum"></small></div>
+        <div class="chips"><button class="chip" data-o="Breast">Breast</button><button class="chip" data-o="Bottle">Bottle</button></div>
+        <div class="breast">
+          <div class="sides">
+            <button class="side" data-side="Left"><span class="l"></span><span class="m"></span><span class="s"></span></button>
+            <button class="side" data-side="Right"><span class="l"></span><span class="m"></span><span class="s"></span></button>
+          </div>
+        </div>
+        <div class="bottle" hidden>
+          <div class="lbl">Amount</div>
+          <div class="pill big"><button class="icon-btn minus" aria-label="Less">−</button><span class="val ml"></span><button class="icon-btn plus" aria-label="More">+</button></div>
+          <button class="action feed"></button>
+        </div>
+        <div class="last"></div>
+      </ha-card>`;
+    const ids = () => this._ids();
+    this.shadowRoot.querySelectorAll(".chip").forEach((b) => b.addEventListener("click", () =>
+      this.call("input_select", "select_option", { entity_id: ids().type, option: b.dataset.o })));
+    this.shadowRoot.querySelectorAll(".side").forEach((b) => b.addEventListener("click", () =>
+      this.call("script", "turn_on", { entity_id: ids().tap, variables: { side: b.dataset.side } })));
+    this.$(".minus").addEventListener("click", () => this.call("input_number", "decrement", { entity_id: ids().amount }));
+    this.$(".plus").addEventListener("click", () => this.call("input_number", "increment", { entity_id: ids().amount }));
+    const btn = this.$(".action");
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      this.call("script", "turn_on", { entity_id: ids().bottle });
+      this.flash(btn, "Logged ✓");
+    });
+  }
+  _update() {
+    if (!this._hass || !this._config) return;
+    const h = this._hass, ids = this._ids(), c = this._config, now = Date.now() / 1000;
+    this.$(".tt").textContent = c.title || "Feeding";
+    const n = khNum(h, ids.count, 0), mlToday = khNum(h, ids.mlToday, 0);
+    this.$(".sum").textContent = `${n} today${mlToday > 0 ? " · " + Math.round(mlToday) + " mL bottle" : ""}`;
+    const type = (khState(h, ids.type) || {}).state || "Breast";
+    this.shadowRoot.querySelectorAll(".chip").forEach((b) => b.classList.toggle("on", b.dataset.o === type));
+    this.$(".breast").hidden = type !== "Breast";
+    this.$(".bottle").hidden = type !== "Bottle";
+    const running = (khState(h, ids.running) || {}).state === "on";
+    const side = (khState(h, ids.side) || {}).state;
+    const lastTs = khTs(h, ids.last);
+    const suggested = lastTs ? (side === "Left" ? "Right" : "Left") : null;
+    const started = khTs(h, ids.started);
+    this.shadowRoot.querySelectorAll(".side").forEach((b) => {
+      const sd = b.dataset.side, isRun = running && side === sd;
+      b.classList.toggle("run", isRun);
+      b.classList.toggle("sug", !running && suggested === sd);
+      let l = sd, m = "Start", sub = "tap to start";
+      if (isRun) {
+        const secs = started ? Math.max(0, Math.floor(now - started)) : 0;
+        m = `${khPad(Math.floor(secs / 60))}:${khPad(secs % 60)}`; sub = "tap to stop";
+      } else if (running) { m = "Switch"; sub = `stop ${side}, start ${sd}`; }
+      else if (suggested === sd) { l = `${sd} · suggested`; }
+      b.querySelector(".l").textContent = l;
+      b.querySelector(".m").textContent = m;
+      b.querySelector(".s").textContent = sub;
+    });
+    const amount = khNum(h, ids.amount, 0);
+    this.$(".ml").textContent = `${Math.round(amount)} mL`;
+    const btn = this.$(".action");
+    btn.disabled = amount <= 0;
+    btn.textContent = btn._flash || (amount <= 0 ? "Set an amount first" : `Log bottle · ${Math.round(amount)} mL`);
+    const detail = ((khState(h, ids.detail) || {}).state || "").replace(/^(unknown|unavailable)$/, "");
+    this.$(".last").textContent = running ? `Feeding on the ${side} · auto-stops after 30 min` : lastTs ? `Last feed ${khAgo(now - lastTs)}${detail ? " · " + detail : ""}` : "No feeds logged yet";
+  }
+  getCardSize() { return 4; }
+}
+
+/* ---------- Nappy (one-tap) ---------- */
+class KhNappyCard extends KhBase {
+  constructor() { super(); this._tickMs = 30000; }
+  _build() {
+    this.shadowRoot.innerHTML = `
+      <style>${KH_BASE_CSS}
+        .btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+        .nb { min-height: 88px; border-radius: 18px; border: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer; color: var(--primary-text-color); padding: 6px; }
+        .nb ha-icon { --mdc-icon-size: 26px; }
+        .nb .l { font-weight: 700; font-size: 15px; }
+        .nb .c { font-size: 12px; color: var(--secondary-text-color); }
+        .nb.done .l { color: #2E9E5B; }
+      </style>
+      <ha-card>
+        <div class="title"><span class="tt"></span><small class="sum"></small></div>
+        <div class="btns">
+          <button class="nb" data-k="wet" style="background:rgba(17,128,122,0.16)"><ha-icon icon="mdi:water" style="color:#11807A"></ha-icon><span class="l">Wet</span><span class="c"></span></button>
+          <button class="nb" data-k="dirty" style="background:rgba(121,85,72,0.18)"><ha-icon icon="mdi:emoticon-poop" style="color:#8D6E63"></ha-icon><span class="l">Dirty</span><span class="c"></span></button>
+          <button class="nb" data-k="both" style="background:var(--secondary-background-color)"><ha-icon icon="mdi:plus-circle-multiple" style="color:var(--secondary-text-color)"></ha-icon><span class="l">Wet &amp; dirty</span><span class="c"></span></button>
+        </div>
+      </ha-card>`;
+    this.shadowRoot.querySelectorAll(".nb").forEach((b) => b.addEventListener("click", () => {
+      this.call("script", "turn_on", { entity_id: `script.${this._p}_log_nappy`, variables: { kind: b.dataset.k } });
+      this.flash(b, "Logged ✓");
+    }));
+  }
+  _update() {
+    if (!this._hass || !this._config) return;
+    const h = this._hass, p = this._p, c = this._config, now = Date.now() / 1000;
+    this.$(".tt").textContent = c.title || "Nappy";
+    const counts = { wet: khNum(h, `counter.${p}_wet_today`, 0), dirty: khNum(h, `counter.${p}_dirty_today`, 0), both: khNum(h, `counter.${p}_wet_and_dirty_today`, 0) };
+    const ts = khTs(h, `input_datetime.${p}_last_nappy`);
+    this.$(".sum").textContent = `${counts.wet + counts.dirty + counts.both} today${ts ? " · last " + khAgo(now - ts) : ""}`;
+    const labels = { wet: "Wet", dirty: "Dirty", both: "Wet & dirty" };
+    this.shadowRoot.querySelectorAll(".nb").forEach((b) => {
+      const k = b.dataset.k;
+      b.classList.toggle("done", !!b._flash);
+      b.querySelector(".l").textContent = b._flash || labels[k];
+      b.querySelector(".c").textContent = `${counts[k]} today`;
+    });
+  }
+  getCardSize() { return 3; }
+}
+
 /* ---------- navigation helper ---------- */
 const khNavigate = (path) => {
   if (!path) return;
@@ -631,6 +809,8 @@ const KH_CARDS = [
   ["kh-status-card", KhStatusCard, "Kids Health – status tiles", "Temperature and last-dose tiles for one child."],
   ["kh-medicine-card", KhMedicineCard, "Kids Health – give medicine", "Medicine chips, dose stepper, given-at time and log button."],
   ["kh-temperature-card", KhTemperatureCard, "Kids Health – temperature", "Temperature stepper, 24 h trend with fever line, log button."],
+  ["kh-feeding-card", KhFeedingCard, "Kids Health – feeding", "Breast (Left/Right live timer) or bottle (mL stepper) feeding."],
+  ["kh-nappy-card", KhNappyCard, "Kids Health – nappy", "One-tap wet / dirty / wet & dirty with today's counts."],
   ["kh-child-card", KhChildCard, "Kids Health – child overview", "Family-view panel: fever badge, medicine/feed/nappy tiles, quick actions."],
   ["kh-timeline-card", KhTimelineCard, "Kids Health – 24 h timeline", "Doses, feeds, nappies and temperatures for several children on one timeline."],
   ["kh-elapsed-card", KhElapsedCard, "Kids Health – elapsed timer", "Counts up from an input_datetime, ticking every second."],
