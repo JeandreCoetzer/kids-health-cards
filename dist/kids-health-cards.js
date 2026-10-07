@@ -4,7 +4,7 @@
  * Entities are found by a per-child prefix (e.g. prefix: kid1 -> input_select.kid1_medicine).
  * MIT License
  */
-const KH_VERSION = "0.3.0";
+const KH_VERSION = "0.3.1";
 
 /* ---------- shared helpers ---------- */
 const khPad = (n) => String(n).padStart(2, "0");
@@ -450,7 +450,7 @@ class KhFeedingCard extends KhBase {
       type: `input_select.${p}_feed_type`, running: `input_boolean.${p}_breastfeeding`, side: `input_select.${p}_breast_side`,
       started: `input_datetime.${p}_feed_started`, last: `input_datetime.${p}_last_feed`, detail: `input_text.${p}_last_feed_detail`,
       count: `counter.${p}_feeds_today`, mlToday: `input_number.${p}_bottle_today`, amount: `input_number.${p}_bottle_amount`,
-      tap: `script.${p}_breast_tap`, bottle: `script.${p}_log_bottle`,
+      tap: `script.${p}_breast_tap`, bottle: `script.${p}_log_bottle`, session: `input_number.${p}_feed_session_secs`,
     };
   }
   _build() {
@@ -520,14 +520,17 @@ class KhFeedingCard extends KhBase {
     const lastTs = khTs(h, ids.last);
     const suggested = lastTs ? (side === "Left" ? "Right" : "Left") : null;
     const started = khTs(h, ids.started);
+    const curSecs = running && started ? Math.max(0, Math.floor(now - started)) : 0;
+    const totalSecs = running ? khNum(h, ids.session, 0) + curSecs : 0;
+    const mmss = (x) => `${khPad(Math.floor(x / 60))}:${khPad(x % 60)}`;
+    const switched = running && totalSecs > curSecs;
     this.shadowRoot.querySelectorAll(".side").forEach((b) => {
       const sd = b.dataset.side, isRun = running && side === sd;
       b.classList.toggle("run", isRun);
       b.classList.toggle("sug", !running && suggested === sd);
       let l = sd, m = "Start", sub = "tap to start";
       if (isRun) {
-        const secs = started ? Math.max(0, Math.floor(now - started)) : 0;
-        m = `${khPad(Math.floor(secs / 60))}:${khPad(secs % 60)}`; sub = "tap to stop";
+        m = mmss(curSecs); sub = switched ? `total ${mmss(totalSecs)} · tap to end` : "tap to end feed";
       } else if (running) { m = "Switch"; sub = `stop ${side}, start ${sd}`; }
       else if (suggested === sd) { l = `${sd} · suggested`; }
       b.querySelector(".l").textContent = l;
@@ -540,7 +543,7 @@ class KhFeedingCard extends KhBase {
     btn.disabled = amount <= 0;
     btn.textContent = btn._flash || (amount <= 0 ? "Set an amount first" : `Log bottle · ${Math.round(amount)} mL`);
     const detail = ((khState(h, ids.detail) || {}).state || "").replace(/^(unknown|unavailable)$/, "");
-    this.$(".last").textContent = running ? `Feeding on the ${side} · auto-stops after 30 min` : lastTs ? `Last feed ${khAgo(now - lastTs)}${detail ? " · " + detail : ""}` : "No feeds logged yet";
+    this.$(".last").textContent = running ? `Total this feed ${mmss(totalSecs)} · ${side} side now · auto-stops after 30 min on one side` : lastTs ? `Last feed ${khAgo(now - lastTs)}${detail ? " · " + detail : ""}` : "No feeds logged yet";
   }
   getCardSize() { return 4; }
 }
