@@ -30,6 +30,7 @@ type: custom:kh-temperature-card
 prefix: kid1
 fever: 38                        # optional
 hours: 24                        # optional
+show_graph: true                 # optional; false hides the built-in sparkline (use a history-graph card instead)
 ---
 type: custom:kh-elapsed-card
 entity: input_datetime.kid1_feed_started
