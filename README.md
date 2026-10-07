@@ -8,6 +8,8 @@ The cards contain no entity IDs of their own — each card finds its helpers fro
 | `custom:kh-status-card` | Temperature tile (red at fever) + last-dose tiles with "Wait · HH:MM" / "OK to give" |
 | `custom:kh-medicine-card` | Medicine chips, dose stepper, "Given at" time picker, gap/max warning, two-tap log button |
 | `custom:kh-temperature-card` | Temperature stepper, 24 h trend with dashed fever line, log button |
+| `custom:kh-feeding-card` | Breast / Bottle chips; big Left / Right buttons with a live mm:ss timer in the running side; bottle mL stepper + log |
+| `custom:kh-nappy-card` | One-tap Wet / Dirty / Wet & dirty buttons with today's counts |
 | `custom:kh-child-card` | Family-view panel per child: fever badge, medicine / feed / nappy / temperature tiles, quick-action buttons |
 | `custom:kh-timeline-card` | Several children on one 24 h timeline — doses, feeds, nappies and temperatures as coloured dots (from the log entity) |
 | `custom:kh-elapsed-card` | Count-up timer (mm:ss) from an `input_datetime`, ticking every second |
@@ -23,6 +25,13 @@ The cards contain no entity IDs of their own — each card finds its helpers fro
 type: custom:kh-status-card
 prefix: kid1
 medicines: [Panadol, Nurofen]   # optional
+# or pick tiles explicitly: tiles: [feed, nappy, temperature, medicine:Panadol]
+---
+type: custom:kh-feeding-card
+prefix: kid1
+---
+type: custom:kh-nappy-card
+prefix: kid1
 ---
 type: custom:kh-medicine-card
 prefix: kid1
@@ -75,6 +84,7 @@ subtitle: tap to stop
 | Temperature entry / logged / last logged | `input_number.kid1_temperature_entry`, `input_number.kid1_temperature`, `input_datetime.kid1_temperature_last_logged` |
 | Feed / nappy (for `feed` and `nappy` tiles) | `input_boolean.kid1_breastfeeding`, `input_select.kid1_breast_side`, `input_datetime.kid1_last_feed`, `input_text.kid1_last_feed_detail`, `counter.kid1_feeds_today`, `input_number.kid1_bottle_today`, `counter.kid1_wet_today`, `counter.kid1_dirty_today`, `counter.kid1_wet_and_dirty_today`, `input_datetime.kid1_last_nappy` |
 | Log entity (timeline) | `input_text.kid1_health_log` — scripts write `logbook.log` entries against it, message like `Panadol · 5.0 mL` |
+| Feeding / nappy scripts | `script.kid1_breast_tap` (field `side`), `script.kid1_log_bottle`, `script.kid1_log_nappy` (field `kind`: wet / dirty / both); feed type `input_select.kid1_feed_type` (Breast, Bottle), bottle amount `input_number.kid1_bottle_amount`, feed start `input_datetime.kid1_feed_started` |
 | Log scripts | `script.kid1_log_medicine`, `script.kid1_log_temperature` |
 
 The cards only display state and call these helpers and scripts; logging logic lives in Home Assistant.
